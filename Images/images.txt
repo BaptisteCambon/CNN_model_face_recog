@@ -1,0 +1,6 @@
+dim = 164x164
+ratio = 1:1
+Les valeurs d'intensité des pixels [0, 255] doivent être divisées par 255 pour être comprises entre 0 et 1 (Tensors PyTorch)
+
+target_conf = 1 ou 0
+target_box = [x, y, w, h] entre 0 et 1. 0 si target_conf = 0
