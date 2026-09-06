@@ -1,4 +1,11 @@
-"""Renomme les images et leurs labels avec des numeros consecutifs."""
+"""Rename image files and their matching labels with consecutive numbers.
+
+Example:
+    python rename.py "path/to/images" "path/to/labels"
+
+Each image must have a text label with the same original filename stem.
+For example, ``cat_01.jpg`` must have a matching ``cat_01.txt`` label.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +17,8 @@ EXTENSIONS_IMAGE = {".png", ".jpg", ".jpeg"}
 
 
 def renommer_fichiers(dossier_images: Path, dossier_labels: Path) -> None:
+    """Rename all matching image/label pairs in the two supplied folders."""
+    # Sort by filename so that the same input always produces the same numbering.
     images = sorted(
         (
             fichier
@@ -22,6 +31,7 @@ def renommer_fichiers(dossier_images: Path, dossier_labels: Path) -> None:
     paires = []
     labels_attendus = set()
     for image in images:
+        # Labels are expected to be text files with the image's original stem.
         label = dossier_labels / f"{image.stem}.txt"
         labels_attendus.add(label.name)
         if not label.is_file():
@@ -42,7 +52,8 @@ def renommer_fichiers(dossier_images: Path, dossier_labels: Path) -> None:
             "Labels sans image correspondante: " + ", ".join(labels_sans_image)
         )
 
-    # Les noms temporaires eviteront les collisions avec les noms numeriques existants.
+    # Rename to temporary names first. This prevents collisions when a destination
+    # name (for example, "1.jpg") already exists in one of the folders.
     fichiers_temporaires = []
     for index, (image, label) in enumerate(paires, start=1):
         image_temp = image.with_name(f".renommage_{index}{image.suffix}")
@@ -62,28 +73,37 @@ def renommer_fichiers(dossier_images: Path, dossier_labels: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Renomme les images et labels correspondants avec des numeros."
+        description=(
+            "Rename matching images and labels with consecutive numbers. "
+            "Pass the image folder first and the label folder second."
+        ),
+        epilog=(
+            "Example: python rename.py path/to/images path/to/labels"
+        ),
     )
     parser.add_argument(
-        "--images",
+        "dossier_images",
         type=Path,
-        default=Path(__file__).resolve().parents[1] / "Images" / "valid" / "images",
-        help="Dossier des images (par defaut: Model/Images/valid/images).",
+        help="Folder containing the images to rename.",
     )
     parser.add_argument(
-        "--labels",
+        "dossier_labels",
         type=Path,
-        default=Path(__file__).resolve().parents[1] / "Images" / "valid" / "labels",
-        help="Dossier des labels (par defaut: Model/Images/valid/labels).",
+        help="Folder containing the matching .txt labels.",
     )
     args = parser.parse_args()
 
-    if not args.images.is_dir():
-        raise NotADirectoryError(f"Dossier d'images introuvable: {args.images}")
-    if not args.labels.is_dir():
-        raise NotADirectoryError(f"Dossier de labels introuvable: {args.labels}")
+    # Validate both inputs before changing any filenames.
+    if not args.dossier_images.is_dir():
+        raise NotADirectoryError(
+            f"Image folder not found: {args.dossier_images}"
+        )
+    if not args.dossier_labels.is_dir():
+        raise NotADirectoryError(
+            f"Label folder not found: {args.dossier_labels}"
+        )
 
-    renommer_fichiers(args.images, args.labels)
+    renommer_fichiers(args.dossier_images, args.dossier_labels)
 
 
 if __name__ == "__main__":
