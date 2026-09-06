@@ -21,7 +21,8 @@ class CustomFaceDetector(nn.Module):
         self.fc1 = nn.Linear(self.fc_input_dim, 128)
         
         # Têtes de sortie
-        self.classifier = nn.Linear(128, 1)      # Probabilité qu'il y ait un visage (0 à 1)
+        # Return logits; the loss and inference code apply sigmoid explicitly.
+        self.classifier = nn.Linear(128, 1)
         self.box_regressor = nn.Linear(128, 4)   # Coordonnées [x, y, w, h] normalisées (0 à 1)
 
     def forward(self, x):
@@ -35,8 +36,7 @@ class CustomFaceDetector(nn.Module):
         x = F.relu(self.fc1(x))
         
         # Calcul des deux prédictions
-        confidence = torch.sigmoid(self.classifier(x))
+        confidence = self.classifier(x)
         bbox = torch.sigmoid(self.box_regressor(x))
         
         return confidence, bbox
-

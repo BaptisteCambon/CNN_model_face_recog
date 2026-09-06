@@ -1,5 +1,6 @@
 from __future__ import annotations
 import argparse
+import random
 from pathlib import Path
 import numpy as np
 from PIL import Image
@@ -20,10 +21,13 @@ from loss import FaceDetectionLoss
 class FaceDataset(Dataset):
     """Loads one normalized YOLO box (or an empty label) per image."""
 
-    def __init__(self, split_dir: Path, image_size: int = 128) -> None:
+    def __init__(
+        self, split_dir: Path, image_size: int = 128, training: bool = False
+    ) -> None:
         self.images_dir = split_dir / "images"
         self.labels_dir = split_dir / "labels"
         self.image_size = image_size
+        self.training = training
         self.images = sorted(
             path
             for path in self.images_dir.iterdir()
@@ -54,6 +58,11 @@ class FaceDataset(Dataset):
             box = torch.tensor([float(value) for value in lines[0][1:]], dtype=torch.float32)
             if torch.any(box < 0) or torch.any(box > 1):
                 raise ValueError(f"Box values must be normalized to [0, 1]: {label_path}")
+            if self.training and random.random() < 0.5:
+                image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+                pixels = np.asarray(image, dtype=np.float32) / 255.0
+                image_tensor = torch.from_numpy(pixels).permute(2, 0, 1)
+                box[0] = 1.0 - box[0]
         return image_tensor, confidence, box
 
 
@@ -92,10 +101,26 @@ def main() -> None:
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_loader = DataLoader(
-        FaceDataset(args.data / "train"), batch_size=args.batch_size, shuffle=True
+    train_dataset = FaceDataset(args.data / "train", training=True)
+    valid_dataset = FaceDataset(args.data / "valid")
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size)
+    train_positive = sum(
+        bool((train_dataset.labels_dir / f"{path.stem}.txt").read_text().strip())
+        for path in train_dataset.images
     )
-    valid_loader = DataLoader(FaceDataset(args.data / "valid"), batch_size=args.batch_size)
+    valid_positive = sum(
+        bool((valid_dataset.labels_dir / f"{path.stem}.txt").read_text().strip())
+        for path in valid_dataset.images
+    )
+    print(
+        f"Dataset: {len(train_dataset)} train ({train_positive} positive, "
+        f"{len(train_dataset) - train_positive} negative), "
+        f"{len(valid_dataset)} validation ({valid_positive} positive, "
+        f"{len(valid_dataset) - valid_positive} negative)"
+    )
+    if len(valid_dataset) - valid_positive < 10:
+        print("Warning: validation has fewer than 10 negative images; metrics may be unreliable.")
     model = CustomFaceDetector().to(device)
     criterion = FaceDetectionLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)

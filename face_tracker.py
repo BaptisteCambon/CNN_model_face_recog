@@ -39,8 +39,17 @@ def predict_face(
     device: torch.device,
 ) -> tuple[float, np.ndarray]:
     height, width = frame.shape[:2]
-    resized = cv2.resize(frame, (IMAGE_SIZE, IMAGE_SIZE))
-    rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+    # Preserve the camera aspect ratio. Stretching a rectangular frame changes
+    # face geometry relative to the square images used during training.
+    scale = min(IMAGE_SIZE / width, IMAGE_SIZE / height)
+    resized_width = max(1, round(width * scale))
+    resized_height = max(1, round(height * scale))
+    resized = cv2.resize(frame, (resized_width, resized_height))
+    pad_x = (IMAGE_SIZE - resized_width) // 2
+    pad_y = (IMAGE_SIZE - resized_height) // 2
+    letterboxed = np.zeros((IMAGE_SIZE, IMAGE_SIZE, 3), dtype=frame.dtype)
+    letterboxed[pad_y : pad_y + resized_height, pad_x : pad_x + resized_width] = resized
+    rgb = cv2.cvtColor(letterboxed, cv2.COLOR_BGR2RGB)
     pixels = torch.from_numpy(rgb.astype(np.float32) / 255.0)
     image = pixels.permute(2, 0, 1).unsqueeze(0).to(device)
 
@@ -49,12 +58,12 @@ def predict_face(
 
     normalized_box = box[0].cpu().numpy()
     center_x, center_y, box_width, box_height = normalized_box
-    x1 = int((center_x - box_width / 2) * width)
-    y1 = int((center_y - box_height / 2) * height)
-    x2 = int((center_x + box_width / 2) * width)
-    y2 = int((center_y + box_height / 2) * height)
+    x1 = int(((center_x - box_width / 2) * IMAGE_SIZE - pad_x) / scale)
+    y1 = int(((center_y - box_height / 2) * IMAGE_SIZE - pad_y) / scale)
+    x2 = int(((center_x + box_width / 2) * IMAGE_SIZE - pad_x) / scale)
+    y2 = int(((center_y + box_height / 2) * IMAGE_SIZE - pad_y) / scale)
     coordinates = np.clip([x1, y1, x2, y2], [0, 0, 0, 0], [width - 1, height - 1, width - 1, height - 1])
-    return float(confidence[0, 0].item()), coordinates
+    return float(torch.sigmoid(confidence[0, 0]).item()), coordinates
 
 
 def main() -> None:
