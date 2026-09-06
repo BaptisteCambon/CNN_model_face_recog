@@ -54,14 +54,14 @@ def main() -> None:
     parser.add_argument(
         "--images",
         type=Path,
-        default=Path(__file__).resolve().parent / "Images" / "valid" / "images",
-        help="Dossier des images (par defaut: Images/valid/images).",
+        default=Path(__file__).resolve().parents[1] / "Images" / "valid" / "images",
+        help="Dossier des images (par defaut: Model/Images/valid/images).",
     )
     parser.add_argument(
         "--labels",
         type=Path,
-        default=Path(__file__).resolve().parent / "Images" / "valid" / "labels",
-        help="Dossier des labels (par defaut: Images/valid/labels).",
+        default=Path(__file__).resolve().parents[1] / "Images" / "valid" / "labels",
+        help="Dossier des labels (par defaut: Model/Images/valid/labels).",
     )
     args = parser.parse_args()
 

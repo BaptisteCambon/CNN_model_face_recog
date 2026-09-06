@@ -1,3 +1,6 @@
+import torch.nn as nn
+
+
 class FaceDetectionLoss(nn.Module):
     def __init__(self):
         super(FaceDetectionLoss, self).__init__()
