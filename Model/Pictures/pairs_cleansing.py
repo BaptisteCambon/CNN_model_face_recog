@@ -1,4 +1,11 @@
-"""Supprime les labels et images qui n'ont pas de fichier correspondant."""
+"""Remove images and labels that do not have a matching pair.
+
+Example:
+    python pairs_cleansing.py "path/to/images" "path/to/labels"
+
+Files are paired by filename stem. For example, ``person_01.jpg`` matches
+``person_01.txt``. Any image or label without a matching partner is deleted.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +19,8 @@ EXTENSIONS_IMAGE = {".jpg", ".jpeg", ".png"}
 def supprimer_fichiers_orphelins(
     dossier_images: Path, dossier_labels: Path
 ) -> None:
+    """Delete images and labels whose filename stems do not match."""
+    # Build lookups by filename stem so extensions do not affect matching.
     images = {
         fichier.stem: fichier
         for fichier in dossier_images.iterdir()
@@ -23,6 +32,7 @@ def supprimer_fichiers_orphelins(
         if fichier.is_file() and fichier.suffix.lower() == ".txt"
     }
 
+    # Sort before deletion so results are predictable and easier to inspect.
     labels_orphelins = sorted(
         (fichier for nom, fichier in labels.items() if nom not in images),
         key=lambda fichier: fichier.name.lower(),
@@ -32,6 +42,8 @@ def supprimer_fichiers_orphelins(
         key=lambda fichier: fichier.name.lower(),
     )
 
+    # Remove labels first, then images. Only files without a matching stem
+    # are included in these lists, so valid image/label pairs are preserved.
     for label in labels_orphelins:
         label.unlink()
 
@@ -47,30 +59,37 @@ def supprimer_fichiers_orphelins(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Supprime les labels sans image correspondante et les images "
-            "sans label correspondant."
-        )
+            "Remove labels without a matching image and images without a "
+            "matching label. Pass the image folder first and the label folder second."
+        ),
+        epilog=(
+            "Example: python pairs_cleansing.py "
+            "path/to/images path/to/labels"
+        ),
     )
     parser.add_argument(
-        "--images",
+        "dossier_images",
         type=Path,
-        default=Path(__file__).resolve().parents[1] / "Images" / "valid" / "images",
-        help="Dossier des images (par defaut: Model/Images/valid/images).",
+        help="Folder containing the images to check.",
     )
     parser.add_argument(
-        "--labels",
+        "dossier_labels",
         type=Path,
-        default=Path(__file__).resolve().parents[1] / "Images" / "valid" / "labels",
-        help="Dossier des labels (par defaut: Model/Images/valid/labels).",
+        help="Folder containing the .txt labels to check.",
     )
     args = parser.parse_args()
 
-    if not args.images.is_dir():
-        raise NotADirectoryError(f"Dossier d'images introuvable: {args.images}")
-    if not args.labels.is_dir():
-        raise NotADirectoryError(f"Dossier de labels introuvable: {args.labels}")
+    # Validate both folders before deleting any files.
+    if not args.dossier_images.is_dir():
+        raise NotADirectoryError(
+            f"Image folder not found: {args.dossier_images}"
+        )
+    if not args.dossier_labels.is_dir():
+        raise NotADirectoryError(
+            f"Label folder not found: {args.dossier_labels}"
+        )
 
-    supprimer_fichiers_orphelins(args.images, args.labels)
+    supprimer_fichiers_orphelins(args.dossier_images, args.dossier_labels)
 
 
 if __name__ == "__main__":
