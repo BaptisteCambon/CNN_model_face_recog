@@ -17,7 +17,14 @@ IMAGE_SIZE = 128
 
 sys.path.insert(0, str(MODEL_DIR))
 from architecture import CustomFaceDetector  # noqa: E402
-from preprocessing import box_from_letterboxed, compute_letterbox_params, paste_into_canvas  # noqa: E402
+from preprocessing import (  # noqa: E402
+    GRID_SIZE,
+    box_from_letterboxed,
+    compute_letterbox_params,
+    decode_grid_predictions,
+    non_max_suppression,
+    paste_into_canvas,
+)
 
 
 def load_model(model_path: Path, device: torch.device) -> CustomFaceDetector:
@@ -34,11 +41,15 @@ def load_model(model_path: Path, device: torch.device) -> CustomFaceDetector:
     return model
 
 
-def predict_face(
+def predict_faces(
     model: CustomFaceDetector,
     frame: np.ndarray,
     device: torch.device,
-) -> tuple[float, np.ndarray]:
+    confidence_threshold: float = 0.5,
+    nms_iou_threshold: float = 0.4,
+) -> list[tuple[float, np.ndarray]]:
+    """Returns a list of (confidence, [x1, y1, x2, y2]) detections, one per
+    face found in the frame, already de-duplicated with NMS."""
     height, width = frame.shape[:2]
     # Preserve the camera aspect ratio using the exact same letterbox transform
     # as FaceDataset in model_training.py (see preprocessing.py). Any mismatch
@@ -53,17 +64,30 @@ def predict_face(
 
     with torch.inference_mode():
         confidence, box = model(image)
+        confidence = torch.sigmoid(confidence)
 
-    normalized_box = tuple(box[0].cpu().numpy().tolist())
-    center_x, center_y, box_width, box_height = box_from_letterboxed(
-        normalized_box, width, height, params, IMAGE_SIZE
+    confidence_grid = confidence[0, 0].cpu().numpy()  # (GRID_SIZE, GRID_SIZE)
+    box_grid = box[0].cpu().numpy()  # (4, GRID_SIZE, GRID_SIZE)
+
+    raw_detections = decode_grid_predictions(
+        confidence_grid, box_grid, GRID_SIZE, confidence_threshold
     )
-    x1 = int(center_x - box_width / 2)
-    y1 = int(center_y - box_height / 2)
-    x2 = int(center_x + box_width / 2)
-    y2 = int(center_y + box_height / 2)
-    coordinates = np.clip([x1, y1, x2, y2], [0, 0, 0, 0], [width - 1, height - 1, width - 1, height - 1])
-    return float(torch.sigmoid(confidence[0, 0]).item()), coordinates
+    detections = non_max_suppression(raw_detections, nms_iou_threshold)
+
+    results = []
+    for score, normalized_box in detections:
+        center_x, center_y, box_width, box_height = box_from_letterboxed(
+            normalized_box, width, height, params, IMAGE_SIZE
+        )
+        x1 = int(center_x - box_width / 2)
+        y1 = int(center_y - box_height / 2)
+        x2 = int(center_x + box_width / 2)
+        y2 = int(center_y + box_height / 2)
+        coordinates = np.clip(
+            [x1, y1, x2, y2], [0, 0, 0, 0], [width - 1, height - 1, width - 1, height - 1]
+        )
+        results.append((score, coordinates))
+    return results
 
 
 def main() -> None:
@@ -99,8 +123,8 @@ def main() -> None:
             if not captured:
                 raise RuntimeError("Unable to read a frame from the camera")
 
-            confidence, coordinates = predict_face(model, frame, device)
-            if confidence >= args.threshold:
+            detections = predict_faces(model, frame, device, confidence_threshold=args.threshold)
+            for confidence, coordinates in detections:
                 x1, y1, x2, y2 = (int(value) for value in coordinates)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 cv2.putText(

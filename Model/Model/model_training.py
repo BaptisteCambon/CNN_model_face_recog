@@ -8,7 +8,13 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from architecture import CustomFaceDetector
 from loss import FaceDetectionLoss
-from preprocessing import box_to_letterboxed, compute_letterbox_params, paste_into_canvas
+from preprocessing import (
+    GRID_SIZE,
+    box_to_letterboxed,
+    compute_letterbox_params,
+    encode_grid_targets,
+    paste_into_canvas,
+)
 
 # python Model\Model\model_training.py --epochs 30 --batch-size 32 --learning-rate 0.001
 # 
@@ -20,10 +26,10 @@ from preprocessing import box_to_letterboxed, compute_letterbox_params, paste_in
 #   --output Model\Model\face_detector.pt
 
 class FaceDataset(Dataset):
-    """Loads one normalized YOLO box (or an empty label) per image.
-
-    Segmentation-style YOLO labels are converted to their enclosing box so
-    they remain usable by this single-box detector.
+    """Loads every normalized YOLO box in a label file (zero or more faces
+    per image) and encodes them into a grid target for the multi-box
+    detector. Segmentation-style YOLO labels are converted to their
+    enclosing box.
     """
 
     def __init__(
@@ -64,13 +70,11 @@ class FaceDataset(Dataset):
 
         label_path = self.labels_dir / f"{image_path.stem}.txt"
         lines = [line.split() for line in label_path.read_text().splitlines() if line.strip()]
-        confidence = torch.tensor([1.0 if lines else 0.0], dtype=torch.float32)
-        box = torch.zeros(4, dtype=torch.float32)
-        if lines:
-            if len(lines) != 1:
-                raise ValueError(f"Expected one YOLO box or polygon label: {label_path}")
+
+        letterboxed_boxes: list[tuple[float, float, float, float]] = []
+        for line in lines:
             try:
-                values = [float(value) for value in lines[0]]
+                values = [float(value) for value in line]
             except ValueError as error:
                 raise ValueError(f"YOLO label contains non-numeric values: {label_path}") from error
             if len(values) == 5:
@@ -84,24 +88,25 @@ class FaceDataset(Dataset):
                 raw_box = tuple(torch.cat((center, size)).tolist())
             else:
                 raise ValueError(
-                    f"Expected one YOLO box or polygon label with normalized values: {label_path}"
+                    f"Expected a YOLO box or polygon label with normalized values: {label_path}"
                 )
-            if torch.any(torch.tensor(values) < 0) or torch.any(torch.tensor(values) > 1):
+            if any(v < 0 or v > 1 for v in values):
                 raise ValueError(f"Box values must be normalized to [0, 1]: {label_path}")
 
-            # Remap the box from the original image's coordinates into the
+            # Remap each box from the original image's coordinates into the
             # letterboxed canvas' coordinates (same frame the model trains on).
-            box = torch.tensor(
-                box_to_letterboxed(raw_box, width, height, params, self.image_size),
-                dtype=torch.float32,
+            letterboxed_boxes.append(
+                box_to_letterboxed(raw_box, width, height, params, self.image_size)
             )
 
-            if self.training and random.random() < 0.5:
-                canvas = canvas[:, ::-1, :].copy()
-                box[0] = 1.0 - box[0]
+        if self.training and letterboxed_boxes and random.random() < 0.5:
+            canvas = canvas[:, ::-1, :].copy()
+            letterboxed_boxes = [(1.0 - cx, cy, w, h) for cx, cy, w, h in letterboxed_boxes]
+
+        confidence_grid, box_grid = encode_grid_targets(letterboxed_boxes, GRID_SIZE)
 
         image_tensor = torch.from_numpy(canvas).permute(2, 0, 1)
-        return image_tensor, confidence, box
+        return image_tensor, torch.from_numpy(confidence_grid), torch.from_numpy(box_grid)
 
 
 def run_epoch(
