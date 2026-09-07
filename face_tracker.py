@@ -47,6 +47,7 @@ def predict_faces(
     device: torch.device,
     confidence_threshold: float = 0.5,
     nms_iou_threshold: float = 0.4,
+    nms_center_distance_ratio_threshold: float = 0.5,
 ) -> list[tuple[float, np.ndarray]]:
     """Returns a list of (confidence, [x1, y1, x2, y2]) detections, one per
     face found in the frame, already de-duplicated with NMS."""
@@ -72,7 +73,9 @@ def predict_faces(
     raw_detections = decode_grid_predictions(
         confidence_grid, box_grid, GRID_SIZE, confidence_threshold
     )
-    detections = non_max_suppression(raw_detections, nms_iou_threshold)
+    detections = non_max_suppression(
+        raw_detections, nms_iou_threshold, nms_center_distance_ratio_threshold
+    )
 
     results = []
     for score, normalized_box in detections:
@@ -103,7 +106,24 @@ def main() -> None:
         "--threshold",
         type=float,
         default=0.5,
-        help="Minimum face confidence to draw a box (default: 0.5).",
+        help="Minimum face confidence to draw a box (default: 0.5). Raise this "
+        "to reduce false positives on hands/clothing/background, at the cost "
+        "of possibly missing harder-to-see faces.",
+    )
+    parser.add_argument(
+        "--nms-iou",
+        type=float,
+        default=0.4,
+        help="IoU threshold for merging overlapping detections (default: 0.4).",
+    )
+    parser.add_argument(
+        "--nms-center-distance",
+        type=float,
+        default=0.5,
+        help="Merge detections whose centers are closer than this, relative to "
+        "box size, even if their IoU is low (default: 0.5). Lower this if a "
+        "single face is still showing up as two boxes (e.g. side profiles); "
+        "raise it if legitimately separate nearby faces get merged into one.",
     )
     args = parser.parse_args()
 
@@ -123,7 +143,14 @@ def main() -> None:
             if not captured:
                 raise RuntimeError("Unable to read a frame from the camera")
 
-            detections = predict_faces(model, frame, device, confidence_threshold=args.threshold)
+            detections = predict_faces(
+                model,
+                frame,
+                device,
+                confidence_threshold=args.threshold,
+                nms_iou_threshold=args.nms_iou,
+                nms_center_distance_ratio_threshold=args.nms_center_distance,
+            )
             for confidence, coordinates in detections:
                 x1, y1, x2, y2 = (int(value) for value in coordinates)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)

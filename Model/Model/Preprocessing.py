@@ -161,16 +161,48 @@ def _iou(box_a: tuple[float, float, float, float], box_b: tuple[float, float, fl
     return inter_area / union if union > 0 else 0.0
 
 
+def _center_distance_ratio(
+    box_a: tuple[float, float, float, float], box_b: tuple[float, float, float, float]
+) -> float:
+    """Distance between box centers, normalized by their average size. A
+    value near 0 means the boxes are essentially concentric even if their
+    sizes differ enough that IoU alone wouldn't flag them as duplicates --
+    the common case when a coarse grid splits one face across two cells with
+    slightly different predicted box sizes."""
+    ax, ay, aw, ah = box_a
+    bx, by, bw, bh = box_b
+    distance = ((ax - bx) ** 2 + (ay - by) ** 2) ** 0.5
+    avg_size = ((aw + ah) / 2 + (bw + bh) / 2) / 2
+    if avg_size <= 0:
+        return float("inf")
+    return distance / avg_size
+
+
 def non_max_suppression(
     detections: list[tuple[float, tuple[float, float, float, float]]],
     iou_threshold: float = 0.4,
+    center_distance_ratio_threshold: float = 0.5,
 ) -> list[tuple[float, tuple[float, float, float, float]]]:
     """Greedy NMS: since a coarse grid can fire in neighboring cells for the
-    same face, this merges duplicate detections down to one box per face."""
+    same face, this merges duplicate detections down to one box per face.
+
+    Two detections are merged if EITHER:
+      - their IoU exceeds iou_threshold (standard NMS), or
+      - their centers are close relative to their size, even with low IoU
+        (center_distance_ratio_threshold). This catches the case where one
+        face straddles two grid cells that predict noticeably different box
+        sizes -- e.g. a side profile -- so plain IoU-based NMS alone leaves
+        both as separate detections.
+    """
     remaining = sorted(detections, key=lambda item: item[0], reverse=True)
     kept: list[tuple[float, tuple[float, float, float, float]]] = []
     while remaining:
         best = remaining.pop(0)
         kept.append(best)
-        remaining = [d for d in remaining if _iou(best[1], d[1]) < iou_threshold]
+        remaining = [
+            d
+            for d in remaining
+            if _iou(best[1], d[1]) < iou_threshold
+            and _center_distance_ratio(best[1], d[1]) >= center_distance_ratio_threshold
+        ]
     return kept
