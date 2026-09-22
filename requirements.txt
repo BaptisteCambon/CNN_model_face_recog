@@ -1,1 +1,10 @@
+# AWS S3 dataset loading
 boto3
+
+# Model training and image preprocessing
+numpy
+Pillow
+torch
+
+# Webcam inference
+opencv-python
