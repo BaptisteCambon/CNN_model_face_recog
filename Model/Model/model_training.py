@@ -1,7 +1,10 @@
 from __future__ import annotations
 import argparse
+import hashlib
 import random
 from pathlib import Path
+from urllib.parse import urlparse
+
 import numpy as np
 from PIL import Image
 import torch
@@ -16,14 +19,65 @@ from preprocessing import (
     paste_into_canvas,
 )
 
+
+def download_s3_dataset(s3_uri: str, cache_root: Path) -> Path:
+    """Download the train/valid dataset below an S3 prefix into a local cache."""
+    try:
+        import boto3
+    except ImportError as error:
+        raise RuntimeError(
+            "S3 datasets require boto3. Install it with: python -m pip install boto3"
+        ) from error
+
+    parsed = urlparse(s3_uri)
+    if parsed.scheme != "s3" or not parsed.netloc:
+        raise ValueError(f"Expected an S3 URI such as s3://bucket/prefix, got: {s3_uri}")
+
+    bucket = parsed.netloc
+    prefix = parsed.path.lstrip("/").rstrip("/")
+    cache_name = hashlib.sha256(s3_uri.encode("utf-8")).hexdigest()[:16]
+    dataset_root = cache_root / cache_name
+    client = boto3.client("s3")
+    paginator = client.get_paginator("list_objects_v2")
+    downloaded = 0
+
+    pages = paginator.paginate(Bucket=bucket, Prefix=f"{prefix}/" if prefix else "")
+    for page in pages:
+        for object_info in page.get("Contents", []):
+            key = object_info["Key"]
+            relative_key = key[len(prefix) + 1 :] if prefix else key
+            relative_path = Path(relative_key)
+            if (
+                len(relative_path.parts) < 3
+                or relative_path.parts[0] not in {"train", "valid"}
+                or relative_path.parts[1] not in {"images", "labels"}
+                or not relative_path.name
+            ):
+                continue
+
+            destination = dataset_root / relative_path
+            destination.resolve().relative_to(dataset_root.resolve())
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if not destination.is_file() or destination.stat().st_size != object_info["Size"]:
+                client.download_file(bucket, key, str(destination))
+                downloaded += 1
+
+    if downloaded:
+        print(f"Downloaded {downloaded} dataset files from {s3_uri} to {dataset_root}")
+    else:
+        print(f"Using cached S3 dataset at {dataset_root}")
+    return dataset_root
+
+
 # python Model\Model\model_training.py --epochs 30 --batch-size 32 --learning-rate 0.001
 # 
 # Model\Model\face_detector.pt
 #
 # python Model\Model\model_training.py `
-#   --epochs 50 `
-#   --batch-size 16 `
-#   --output Model\Model\face_detector.pt
+#  --data s3://baptistecambon/face_recog `
+#  --epochs 50 `
+#  --batch-size 16 `
+#  --learning-rate 0.001
 
 class FaceDataset(Dataset):
     """Loads every normalized YOLO box in a label file (zero or more faces
@@ -136,16 +190,31 @@ def run_epoch(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train the custom face detector.")
-    parser.add_argument("--data", type=Path, default=Path(__file__).resolve().parent.parent / "Images")
+    parser.add_argument(
+        "--data",
+        default=str(Path(__file__).resolve().parent.parent / "Images"),
+        help="Local dataset path or S3 URI, e.g. s3://baptistecambon/face_recog",
+    )
+    parser.add_argument(
+        "--s3-cache",
+        type=Path,
+        default=Path.home() / ".cache" / "cnn_model_face_recog",
+        help="Local cache directory used when --data is an S3 URI",
+    )
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--output", type=Path, default=Path(__file__).resolve().parent / "face_detector.pt")
     args = parser.parse_args()
 
+    data_root = (
+        download_s3_dataset(args.data, args.s3_cache)
+        if args.data.startswith("s3://")
+        else Path(args.data)
+    )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_dataset = FaceDataset(args.data / "train", training=True)
-    valid_dataset = FaceDataset(args.data / "valid")
+    train_dataset = FaceDataset(data_root / "train", training=True)
+    valid_dataset = FaceDataset(data_root / "valid")
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size)
     train_positive = sum(
