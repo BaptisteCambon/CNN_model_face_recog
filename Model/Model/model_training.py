@@ -74,7 +74,7 @@ def download_s3_dataset(s3_uri: str, cache_root: Path) -> Path:
     return dataset_root
 
 
-# python Model\Model\model_training.py --epochs 30 --batch-size 32 --learning-rate 0.001
+# python Model\Model\model_training.py --data s3://baptistecambon/face_recog --epochs 30 --batch-size 32 --learning-rate 0.001
 # 
 # Model\Model\face_detector.pt
 #
