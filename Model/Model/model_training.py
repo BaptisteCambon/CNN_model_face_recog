@@ -1,6 +1,5 @@
 from __future__ import annotations
 import argparse
-import hashlib
 import random
 from pathlib import Path
 from urllib.parse import urlparse
@@ -21,7 +20,7 @@ from preprocessing import (
 
 
 def download_s3_dataset(s3_uri: str, cache_root: Path) -> Path:
-    """Download the train/valid dataset below an S3 prefix into a local cache."""
+    """Download the S3 train/valid tree into matching local directories."""
     try:
         import boto3
     except ImportError as error:
@@ -35,8 +34,7 @@ def download_s3_dataset(s3_uri: str, cache_root: Path) -> Path:
 
     bucket = parsed.netloc
     prefix = parsed.path.lstrip("/").rstrip("/")
-    cache_name = hashlib.sha256(s3_uri.encode("utf-8")).hexdigest()[:16]
-    dataset_root = cache_root / cache_name
+    dataset_root = cache_root
     client = boto3.client("s3")
     paginator = client.get_paginator("list_objects_v2")
     downloaded = 0
@@ -199,7 +197,7 @@ def main() -> None:
         "--s3-cache",
         type=Path,
         default=Path.home() / ".cache" / "cnn_model_face_recog",
-        help="Local cache directory used when --data is an S3 URI",
+        help="Local dataset directory for S3 downloads (train/ and valid/ are created inside)",
     )
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=32)
