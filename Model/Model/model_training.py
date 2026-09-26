@@ -35,13 +35,17 @@ def download_s3_dataset(s3_uri: str, cache_root: Path) -> Path:
     bucket = parsed.netloc
     prefix = parsed.path.lstrip("/").rstrip("/")
     dataset_root = cache_root
+    print(f"Checking S3 dataset {s3_uri} and downloading files to {dataset_root}...", flush=True)
     client = boto3.client("s3")
     paginator = client.get_paginator("list_objects_v2")
     downloaded = 0
+    checked = 0
 
     pages = paginator.paginate(Bucket=bucket, Prefix=f"{prefix}/" if prefix else "")
-    for page in pages:
-        for object_info in page.get("Contents", []):
+    for page_number, page in enumerate(pages, start=1):
+        objects = page.get("Contents", [])
+        print(f"Checking S3 listing page {page_number} ({len(objects)} objects)...", flush=True)
+        for object_info in objects:
             key = object_info["Key"]
             relative_key = key[len(prefix) + 1 :] if prefix else key
             relative_path = Path(relative_key)
@@ -59,11 +63,14 @@ def download_s3_dataset(s3_uri: str, cache_root: Path) -> Path:
             if not destination.is_file() or destination.stat().st_size != object_info["Size"]:
                 client.download_file(bucket, key, str(destination))
                 downloaded += 1
+                if downloaded % 100 == 0:
+                    print(f"Downloaded {downloaded} S3 files so far...", flush=True)
+            checked += 1
 
     if downloaded:
-        print(f"Downloaded {downloaded} dataset files from {s3_uri} to {dataset_root}")
+        print(f"Downloaded {downloaded} dataset files from {s3_uri} to {dataset_root}", flush=True)
     else:
-        print(f"Using cached S3 dataset at {dataset_root}")
+        print(f"Using cached S3 dataset at {dataset_root} ({checked} files checked)", flush=True)
     return dataset_root
 
 
@@ -171,7 +178,9 @@ def run_epoch(
     training = optimizer is not None
     model.train(training)
     total_loss = 0.0
-    for images, target_confs, target_boxes in dataloader:
+    phase = "Training" if training else "Validation"
+    batch_count = len(dataloader)
+    for batch_number, (images, target_confs, target_boxes) in enumerate(dataloader, start=1):
         images = images.to(device)
         target_confs = target_confs.to(device)
         target_boxes = target_boxes.to(device)
@@ -183,6 +192,8 @@ def run_epoch(
             batch_loss.backward()
             optimizer.step()
         total_loss += batch_loss.item()
+        if batch_number % 100 == 0 or batch_number == batch_count:
+            print(f"{phase}: batch {batch_number}/{batch_count}", flush=True)
     return total_loss / len(dataloader)
 
 
@@ -211,6 +222,7 @@ def main() -> None:
         else Path(args.data)
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Indexing train and validation datasets in {data_root}...", flush=True)
     train_dataset = FaceDataset(data_root / "train", training=True)
     valid_dataset = FaceDataset(data_root / "valid")
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
@@ -238,6 +250,7 @@ def main() -> None:
 
     print(f"Training on {device} ({len(train_loader.dataset)} train, {len(valid_loader.dataset)} valid)")
     for epoch in range(1, args.epochs + 1):
+        print(f"Starting epoch {epoch}/{args.epochs}", flush=True)
         train_loss = run_epoch(model, train_loader, criterion, device, optimizer)
         with torch.no_grad():
             valid_loss = run_epoch(model, valid_loader, criterion, device)
