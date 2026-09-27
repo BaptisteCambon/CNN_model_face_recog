@@ -6,6 +6,7 @@ This document tracks immediate actionable tasks, active development priorities, 
 
 ## Priority 1: High Priority / In Progress
 
+- [X] Finish the line-by-line walkthrough in progress: `Preprocessing.py`
 - [ ] Finish the line-by-line walkthrough in progress: `architecture.py`
 - [ ] Finish the line-by-line walkthrough in progress: `loss.py`
 - [ ] Finish the line-by-line walkthrough in progress: `model_training.py`
