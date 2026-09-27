@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from preprocessing import GRID_SIZE
+from Preprocessing import GRID_SIZE
 
 
 class CustomFaceDetector(nn.Module):
